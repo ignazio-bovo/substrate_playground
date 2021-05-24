@@ -39,8 +39,9 @@ pub use frame_support::{
 };
 use pallet_transaction_payment::CurrencyAdapter;
 
-/// Import the template pallet.
-pub use pallet_template;
+/// STEP 1 Import the template pallet.
+//pub use utxo;
+pub mod utxo;
 
 /// An index to a block.
 pub type BlockNumber = u32;
@@ -68,10 +69,6 @@ pub type Hash = sp_core::H256;
 /// Digest item type.
 pub type DigestItem = generic::DigestItem<Hash>;
 
-// custom part here
-pub mod utxo;
-// end custom part
-   
 /// Opaque types. These are used by the CLI to instantiate machinery that don't need to know
 /// the specifics of the runtime. They can then be made to be agnostic over specific formats
 /// of data like extrinsics, allowing for them to continue syncing the network through upgrades
@@ -160,6 +157,7 @@ impl frame_system::Config for Runtime {
 	/// Block & extrinsics weights: base values and limits.
 	type BlockWeights = BlockWeights;
 	/// The maximum length of a block (in bytes).
+    ///
 	type BlockLength = BlockLength;
 	/// The identifier used to distinguish between accounts.
 	type AccountId = AccountId;
@@ -273,8 +271,8 @@ impl pallet_sudo::Config for Runtime {
 	type Call = Call;
 }
 
-/// Configure the pallet-template in pallets/template.
-impl pallet_template::Config for Runtime {
+/// STEP 2 Configure the pallet-template in pallets/template.
+impl utxo::Config for Runtime {
 	type Event = Event;
 }
 
@@ -293,8 +291,9 @@ construct_runtime!(
 		Balances: pallet_balances::{Pallet, Call, Storage, Config<T>, Event<T>},
 		TransactionPayment: pallet_transaction_payment::{Pallet, Storage},
 		Sudo: pallet_sudo::{Pallet, Call, Config<T>, Storage, Event<T>},
-		// Include the custom logic from the pallet-template in the runtime.
-		TemplateModule: pallet_template::{Pallet, Call, Storage, Event<T>},
+		// STEP 3 Include the custom logic from the pallet-template in the runtime.
+		//Utxo: utxo::{Pallet, Call, Storage, Event<T>},
+		Utxo: utxo::{Pallet, Call, Storage, Event},
 	}
 );
 
@@ -490,7 +489,8 @@ impl_runtime_apis! {
 			add_benchmark!(params, batches, frame_system, SystemBench::<Runtime>);
 			add_benchmark!(params, batches, pallet_balances, Balances);
 			add_benchmark!(params, batches, pallet_timestamp, Timestamp);
-			add_benchmark!(params, batches, pallet_template, TemplateModule);
+            // STEP 4 add benchmark
+			add_benchmark!(params, batches, utxo, TemplateModule);
 
 			if batches.is_empty() { return Err("Benchmark not found for this pallet.".into()) }
 			Ok(batches)

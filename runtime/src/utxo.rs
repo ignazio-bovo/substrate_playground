@@ -4,29 +4,36 @@ use frame_support::{
     dispatch::{DispatchResult, Vec},
     ensure,
 };
+
+#[cfg(feature = "std")]
+use serde::{Deserialize, Serialize};
 use sp_core::{
     crypto::Public as _, 
     H256, 
     H512,
-    sr25519::{Public,Signature},
+    //sr25519::{Public,Signature},
 };
-use sp_std::collections::btree_map::BTreeMap;
+//use sp_std::collections::btree_map::BTreeMap;
 use sp_runtime::{
     traits::{BlakeTwo256, Hash, SaturatedConversion}, 
-    transaction_validity::{TransactionLongevity, ValidTransaction},
+    //transaction_validity::{TransactionLongevity, ValidTransaction},
 };
 
-pub trait Trait: frame_system::Trait {
-    type Event: From<Event> + Into<<Self as frame_system::Trait>::Event>;
+pub trait Config: frame_system::Config {
+    type Event: From<Event> + Into<<Self as frame_system::Config>::Event>;
 }
 
 pub type Value = u128;
 
+#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
+#[derive(PartialEq, Eq, PartialOrd, Default, Clone, Encode, Decode, Hash, Debug)]
 pub struct Transaction {
     pub inputs: Vec<TransactionInput>,
     pub outputs: Vec<TransactionOutput>,
 }
 
+#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
+#[derive(PartialEq, Eq, PartialOrd, Default, Clone, Encode, Decode, Hash, Debug)]
 pub struct TransactionInput {
     // reference to a utxo to be spent
     pub outpoint: H256,
@@ -35,6 +42,8 @@ pub struct TransactionInput {
     pub sigscript:H512,
 }
 
+#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
+#[derive(PartialEq, Eq, PartialOrd, Default, Clone, Encode, Decode, Hash, Debug)]
 pub struct TransactionOutput {
     // money to be send
     pub value: Value, 
@@ -49,58 +58,36 @@ decl_storage! {
     // declaration: 
     // * Store trait generated associating each storage item to the Module 
     // * Utxo:  prefix used for storage items of this module
-    trait Store for Module<T: Trait> as Utxo {
-        UtxoStore build(|config: &GenesisConfig|) {
+    trait Store for Module<T: Config> as Utxo {
+        UtxoStore build(|config: &GenesisConfig| {
             config.genesis_utxos
                 .iter()
                 .cloned()
                 .map(|u| (BlakeTwo256::hash_of(&u), u))
                 .collect::<Vec<_>>()
-        }: map hasher(identity) H256 => Option<TransactionOutput>
+        }): map hasher(identity) H256 => Option<TransactionOutput>
     }
     add_extra_genesis{
         // storage value initialization
         config(genesis_utxos): Vec<TransactionOutput>;
     }
 }
-
 decl_module! {
-    pub struct Module<T: Trait> for enum Call where origin: T::Origin {
-        fn deposit_event() = default;
-
-        // Dispatch a single transaction and update the utxo set accordingly
-        pub fn spend(_origin, transaction: Transaction) -> DispatchResult {
-
-            let transaction_validity = Self::validate_transaction(&transaction)?;
-
-            Self::update_storage(&transaction, transaction_validity.priority as u128)?;
-
-            Self::deposit_event(Event::TransactionSuccess(transaction));
-
-            Ok(());
+    pub struct Module<T: Config> for enum Call where origin: T::Origin {
+        #[weight = 0]
+        fn my_long_function(_origin) -> DispatchResult {
+            Ok(())
         }
     }
 }
-
 decl_event!(
-    pub enum Event {
-        // tx successful 
-        TransactionSuccess(Transaction),
-    }
+	pub enum Event {
+		/// Transaction was executed successfully
+		TransactionSuccess(Transaction),
+		/// Rewards were issued. Amount, UTXO hash.
+		RewardsIssued(Value, H256),
+		/// Rewards were wasted
+		RewardsWasted,
+	}
 );
 
-impl<T: Trait> Module<T> {
-
-    pub fn validate_transaction(transaction: &Transaction) -> Result<ValidTransaction, &'static str> {
-        // check basic requirements
-        ensure!(!transaction.inputs.is_empty(), "no inputs");
-        ensure!(!transaction.output.is_empty(), "no outputs");
-        {
-            let input_set: BTreeMaps<_, ()> = transaction.inputs.iter(|input| (input,
-                                                                               ())).collect();
-            ensure!(input_set.len() == transaction.inputs.len(), "each input must only be
-                    used once");
-        }
-    }
-
-}
