@@ -69,7 +69,7 @@ pub type Hash = sp_core::H256;
 pub type DigestItem = generic::DigestItem<Hash>;
 
 // custom part here
-//
+pub mod utxo;
 // end custom part
    
 /// Opaque types. These are used by the CLI to instantiate machinery that don't need to know
