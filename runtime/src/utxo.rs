@@ -70,7 +70,7 @@ decl_module! {
         fn set_value(origin) -> DispatchResult {
             // verify first paridigm
             let _sender = ensure_signed(origin); // throws if not_signed
-            //<SimpleValue<T>>::put(3);
+            <SimpleValue>::put(3);
 
             Ok(())
         }
