@@ -2,8 +2,11 @@ use codec::{Decode, Encode};
 use frame_support::{
     decl_event, decl_storage, decl_module,
     dispatch::{DispatchResult, Vec},
+    StorageValue,
     ensure,
 };
+
+use frame_system::ensure_signed;
 
 #[cfg(feature = "std")]
 use serde::{Deserialize, Serialize};
@@ -53,33 +56,27 @@ pub struct TransactionOutput {
 }
 
 // how the state is stored on chain ?
-
 decl_storage! {
-    // declaration: 
-    // * Store trait generated associating each storage item to the Module 
-    // * Utxo:  prefix used for storage items of this module
-    trait Store for Module<T: Config> as Utxo {
-        UtxoStore build(|config: &GenesisConfig| {
-            config.genesis_utxos
-                .iter()
-                .cloned()
-                .map(|u| (BlakeTwo256::hash_of(&u), u))
-                .collect::<Vec<_>>()
-        }): map hasher(identity) H256 => Option<TransactionOutput>
-    }
-    add_extra_genesis{
-        // storage value initialization
-        config(genesis_utxos): Vec<TransactionOutput>;
+    trait Store for Module<T:Config> as Utxo {
+        // let's try to add a counter display the block height 
+        pub SimpleValue get(fn get_block_height): u64; // this becomes a struct wrapping a usize
+    
     }
 }
+
 decl_module! {
     pub struct Module<T: Config> for enum Call where origin: T::Origin {
-        #[weight = 0]
-        fn my_long_function(_origin) -> DispatchResult {
+        #[weight = 1_000]
+        fn set_value(origin) -> DispatchResult {
+            // verify first paridigm
+            let _sender = ensure_signed(origin); // throws if not_signed
+            //<SimpleValue<T>>::put(3);
+
             Ok(())
         }
     }
 }
+
 decl_event!(
 	pub enum Event {
 		/// Transaction was executed successfully
