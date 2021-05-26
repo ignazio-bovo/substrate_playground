@@ -305,3 +305,4 @@ mod tests {
 		type BlockAuthor = ();
 		type Issuance = ();
 	}
+}
