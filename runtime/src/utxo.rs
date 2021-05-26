@@ -6,7 +6,7 @@ use frame_support::{
     ensure,
 };
 
-use frame_system::ensure_signed;
+use frame_system::{ensure_signed, GenesisConfig};
 
 #[cfg(feature = "std")]
 use serde::{Deserialize, Serialize};
@@ -257,8 +257,8 @@ mod tests {
 
 	use frame_support::{assert_ok, assert_noop, impl_outer_origin, parameter_types, weights::Weight};
 	use sp_runtime::{testing::Header, traits::IdentityLookup, Perbill};
-	use sp_keystore::testing::KeyStore;//, SR25519};
-	use sp_keystore::KeystoreExt;
+    use sp_keystore::testing::KeyStore;//, SR25519};
+	//use sp_keystore::KeystoreExt;
 
 	impl_outer_origin! {
 		pub enum Origin for Test {}
@@ -285,15 +285,15 @@ mod tests {
 		type Header = Header;
 		type Event = ();
 		type BlockHashCount = BlockHashCount;
-		type MaximumBlockWeight = MaximumBlockWeight;
+		//type MaximumBlockWeight = MaximumBlockWeight;
 		type DbWeight = ();
-		type BlockExecutionWeight = ();
-		type ExtrinsicBaseWeight = ();
-		type MaximumExtrinsicWeight = MaximumBlockWeight;
-		type MaximumBlockLength = MaximumBlockLength;
-		type AvailableBlockRatio = AvailableBlockRatio;
+		//type BlockExecutionWeight = ();
+		//type ExtrinsicBaseWeight = ();
+		//type MaximumExtrinsicWeight = MaximumBlockWeight;
+		//type MaximumBlockLength = MaximumBlockLength;
+		//type AvailableBlockRatio = AvailableBlockRatio;
 		type Version = ();
-		type ModuleToIndex = ();
+		//type ModuleToIndex = ();
 		type AccountData = ();
 		type OnNewAccount = ();
 		type OnKilledAccount = ();
@@ -302,7 +302,20 @@ mod tests {
 
 	impl Config for Test {
 		type Event = ();
-		type BlockAuthor = ();
-		type Issuance = ();
+		//type BlockAuthor = ();
+		//type Issuance = ();
 	}
+    type Utxo = Module<Test>;
+
+    fn new_test_ext() -> sp_io::TestExternalities {
+        // 1. create keys for a test user: alice 
+        let keystore = KeyStore::new();
+        // 2. store a seed ( 100, alice owned ) in genesis storage
+        // 3. Store alic's keys storage
+        let mut t = system::GenesisConfig::default() 
+            .build_storage()
+            .unwrap();
+        let mut ext = sp_io::TestExternalities::from(t);
+        ext 
+    }
 }
