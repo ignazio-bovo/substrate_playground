@@ -246,7 +246,7 @@ impl<T: Config> Module<T> {
         //3. write utxos to UtxoStore
     }
     // in order to prevent a replay attack : malitious nodes can observe recurring 
-    // transactioon and copy utxo signatures to spend Alice utxos . instead of hashing 
+    // transaction and copy utxo signatures to spend Alice utxos . instead of hashing 
 
 }
 
@@ -258,7 +258,8 @@ mod tests {
 	use frame_support::{assert_ok, assert_noop, impl_outer_origin, parameter_types, weights::Weight};
 	use sp_runtime::{testing::Header, traits::IdentityLookup, Perbill};
     use sp_keystore::testing::KeyStore;//, SR25519};
-	//use sp_keystore::KeystoreExt;
+    use sp_keystore::KeystoreExt;
+    use sp_core::SR25519;
 
 	impl_outer_origin! {
 		pub enum Origin for Test {}
@@ -305,17 +306,60 @@ mod tests {
 		//type BlockAuthor = ();
 		//type Issuance = ();
 	}
+
     type Utxo = Module<Test>;
 
+    const ALICE_PHRASE: &str = "Everlasting Anxious Ducks Governed Bald Enya";
     fn new_test_ext() -> sp_io::TestExternalities {
         // 1. create keys for a test user: alice 
         let keystore = KeyStore::new();
+        let alice_pub_key = keystore.write().sr25519_generate_new(SR5519, Some((ALICE_PHRASE))).unwrap; 
+
         // 2. store a seed ( 100, alice owned ) in genesis storage
         // 3. Store alic's keys storage
-        let mut t = system::GenesisConfig::default() 
+        let mut t = GenesisConfig::default() 
             .build_storage()
             .unwrap();
+        t.top.extend(
+          GenesisConfig { 
+              genesis_utxos: vec![
+                  TransactionOutput {
+                      value: 100, 
+                      pubkey: H256::from(alice_pub_key),
+                  }
+              ],
+              ..Default::default() // populate the remaining paremeters with default value
+            }
+            .build_storage()
+            .unwrap()
+            .top(),
+        );
         let mut ext = sp_io::TestExternalities::from(t);
         ext 
+    }
+    #[test]
+    fn test_simple_transaction() {
+        new_test_ext().execute_with(|| {
+            let alice_pub_key = sp_io::crypto::sr25519_public_keys(SR25519)[0]; 
+
+            let mut transaction = Transaction {
+                inputs: vec![TransactionInput {
+                    output: H256::from(GENESIS_UTXO),
+                    sigscript: H512::zero(), //sign over tx with all zero
+                }],
+                outputs: vec![TransactionOutput {
+                    value: 50,
+                    pubkey: H256::from(alice_pub_key),
+                }],
+            };
+            
+            let alice_signature = sp_io::crypto::sr25519_sign(SR25519, &alice_pub_key, &transaction.encode()).unwrap();
+            transaction.inputs[0].sigscript = H512::from(alice_signature); 
+
+            let new_utxo_hash = BlakeTwo256::hash_of(&(&transaction.encode(), 0 as u64));
+
+            //assert_ok(Utxo::spend(Origin::signed[0]), transaction)
+        })
+
     }
 }
