@@ -23,7 +23,9 @@ use sp_runtime::{
     transaction_validity::{TransactionLongevity, ValidTransaction},
 };
 
-// this entire module that we are building implement this Config trait
+use frame_support::sp_io;
+
+// this entire module that we are building implement this 
 pub trait Config: frame_system::Config {
     type Event: From<Event> + Into<<Self as frame_system::Config>::Event>;
 }
@@ -77,7 +79,7 @@ decl_module! {
 
 
 decl_event! (
-    // when anything happens events can be emitted 
+    // when anything happens events can b)e emitted 
     // what's expected is a series of variants that we are expected to emite
 	pub enum Event {
 		/// Transaction was executed successfully
@@ -121,6 +123,14 @@ pub struct TransactionOutput {
 
 // implement helper function for the trait Config 
 impl<T: Config> Module<T> {
+    pub fn get_simple_transaction(transaction: &Transaction) -> Vec<u8> {
+        let mut trx = transaction.clone();
+        for input in trx.inputs.iter_mut() {
+            input.sigscript = H512::zero(); 
+        }
+        trx.encode()
+
+    }
     fn validate_transaction(transaction: &Transaction) -> Result<Value, &'static str> {
         // ensure that tx has valid inputs and outputs 
         ensure!(!transaction.inputs.is_empty(), "no_inputs");
@@ -137,10 +147,41 @@ impl<T: Config> Module<T> {
             let output_set: BTreeMap<_, ()> = transaction.inputs.iter().map(|input| (input, ()))
                 .collect();
             ensure!(output_set.len() == transaction.inputs.len(), "each input must only be used once");
-
         }
-        let ans: Value = 182;
-        Ok(ans)
+        
+        let simple_transaction = Self::get_simple_transaction(transaction);
+        let mut total_input: Value = 0;
+        let mut total_output: Value = 0; 
+
+        // verify input tx 
+        for input in transaction.inputs.iter() {
+            if let Some(input_utxo) = <UtxoStore>::get(&input.outpoint) {
+                ensure!(sp_io::crypto::sr25519_verify(
+                        &Signature::from_raw(*input.sigscript.as_fixed_bytes()),
+                        &simple_transaction, 
+                        &Public::from_h256(input_utxo.pubkey)
+                                                     ), 
+                    "signature must be valid");
+                total_input = total_input.checked_add(input_utxo.value).ok_or("input value overflow")?;
+            } else {
+                // TODO
+            }
+        }
+
+        let mut output_index: u64 = 0; 
+        for output in transaction.outputs.iter() {
+            ensure!(output.value > 0, " output value must be nonzero");
+            let hash = BlakeTwo256::hash_of(&(&transaction.encode(), output_index));
+            output_index = output_index.checked_add(1).ok_or("output inedx overflow")?;
+            ensure!(!<UtxoStore>::contains_key(hash), "output already exists"); 
+            total_output = total_output.checked_add(output.value).ok_or("output value overflow")?;
+            
+        }
+
+        ensure!( total_input >= total_output, "output value must be <= input value"); 
+        let reward = total_input.checked_sub(total_output).ok_or("reward overflow")?;
+        Ok(reward)
+
     }
     fn update_storage(transaction: &Transaction, reward: Value) -> DispatchResult {
         let new_total = <RewardTotal>::get()
@@ -208,3 +249,59 @@ impl<T: Config> Module<T> {
     // transactioon and copy utxo signatures to spend Alice utxos . instead of hashing 
 
 }
+
+//// TESTS for this module
+#[cfg(test)]
+mod tests {
+	use super::*; // use the whole Module above as a library // use the whole Module above as a library
+
+	use frame_support::{assert_ok, assert_noop, impl_outer_origin, parameter_types, weights::Weight};
+	use sp_runtime::{testing::Header, traits::IdentityLookup, Perbill};
+	use sp_keystore::testing::KeyStore;//, SR25519};
+	use sp_keystore::KeystoreExt;
+
+	impl_outer_origin! {
+		pub enum Origin for Test {}
+	}
+
+	#[derive(Clone, Eq, PartialEq)]
+	pub struct Test;
+	parameter_types! {
+			pub const BlockHashCount: u64 = 250;
+			pub const MaximumBlockWeight: Weight = 1024;
+			pub const MaximumBlockLength: u32 = 2 * 1024;
+			pub const AvailableBlockRatio: Perbill = Perbill::from_percent(75);
+	}
+	impl frame_system::Config for Test {
+		type BaseCallFilter = ();
+		type Origin = Origin;
+		type Call = ();
+		type Index = u64;
+		type BlockNumber = u64;
+		type Hash = H256;
+		type Hashing = BlakeTwo256;
+		type AccountId = u64;
+		type Lookup = IdentityLookup<Self::AccountId>;
+		type Header = Header;
+		type Event = ();
+		type BlockHashCount = BlockHashCount;
+		type MaximumBlockWeight = MaximumBlockWeight;
+		type DbWeight = ();
+		type BlockExecutionWeight = ();
+		type ExtrinsicBaseWeight = ();
+		type MaximumExtrinsicWeight = MaximumBlockWeight;
+		type MaximumBlockLength = MaximumBlockLength;
+		type AvailableBlockRatio = AvailableBlockRatio;
+		type Version = ();
+		type ModuleToIndex = ();
+		type AccountData = ();
+		type OnNewAccount = ();
+		type OnKilledAccount = ();
+		type SystemWeightInfo = ();
+	}
+
+	impl Config for Test {
+		type Event = ();
+		type BlockAuthor = ();
+		type Issuance = ();
+	}
