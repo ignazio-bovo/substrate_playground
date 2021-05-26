@@ -14,7 +14,7 @@ use sp_core::{
     crypto::Public as _, 
     H256, 
     H512,
-    //sr25519::{Public,Signature},
+    sr25519::{Public,Signature},
 };
 
 use sp_std::collections::btree_map::BTreeMap;
@@ -38,7 +38,7 @@ decl_storage! {
                 .map(|u| (BlakeTwo256::hash_of(&u), u))
                 .collect::<Vec<_>>()
         }): map hasher(identity) H256 => Option<TransactionOutput>;
-        pub RewardTotal get(reward_total): Value;
+        pub RewardTotal get(fn reward_total): Value;
     }
 
     // Init state
@@ -57,10 +57,10 @@ decl_module! {
         pub fn spend(_origin, transaction: Transaction) -> DispatchResult {
             
             // 1. verify first : transaction validity
-            let transaction_validity = Self::validate_transaction(&transaction)?;
+            let reward = Self::validate_transaction(&transaction)?;
 
             // 2. Write transation to state
-            Self::update_storage(&transaction)?;
+            Self::update_storage(&transaction, reward)?;
 
             // 3. Wolud be nice to emit some sort of event signalling succssful transaction
             Self::deposit_event(Event::TransactionSuccess(transaction));
@@ -68,14 +68,10 @@ decl_module! {
             Ok(())
         }
 
-        fn on_finalize() {
+        //fn on_finalize() {
             // send tips to validators
-            let auth: Vec<_> = Aura::authorities().iter().map(|x| {
-                let r: &Public = x.as_ref();
-                r.0.into()
-            }).collect();
-            Self::disperse_reward(&auth);
-        }
+            //Self::disperse_reward(&auth);
+        //}
     }
 }
 
@@ -104,7 +100,7 @@ pub struct Transaction {
 }
 
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
-#[derive(PartialEq, Eq, PartialOrd, Default, Clone, Encode, Decode, Hash, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Default, Clone, Encode, Decode, Hash, Debug)]
 pub struct TransactionInput {
     // reference to a utxo to be spent
     pub outpoint: H256,
@@ -114,7 +110,7 @@ pub struct TransactionInput {
 }
 
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
-#[derive(PartialEq, Eq, PartialOrd, Default, Clone, Encode, Decode, Hash, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Default, Clone, Encode, Decode, Hash, Debug)]
 pub struct TransactionOutput {
     // money to be send
     pub value: Value, 
@@ -125,10 +121,32 @@ pub struct TransactionOutput {
 
 // implement helper function for the trait Config 
 impl<T: Config> Module<T> {
+    fn validate_transaction(transaction: &Transaction) -> Result<Value, &'static str> {
+        // ensure that tx has valid inputs and outputs 
+        ensure!(!transaction.inputs.is_empty(), "no_inputs");
+        ensure!(!transaction.outputs.is_empty(), "no_inputs");
+
+        // one time use heap variables
+        {
+            let input_set: BTreeMap<_, ()> = transaction.inputs.iter().map(|input| (input, ()))
+                .collect();
+            ensure!(input_set.len() == transaction.inputs.len(), "each input must only be used once");
+        }
+
+        {
+            let output_set: BTreeMap<_, ()> = transaction.inputs.iter().map(|input| (input, ()))
+                .collect();
+            ensure!(output_set.len() == transaction.inputs.len(), "each input must only be used once");
+
+        }
+        let ans: Value = 182;
+        Ok(ans)
+    }
     fn update_storage(transaction: &Transaction, reward: Value) -> DispatchResult {
         let new_total = <RewardTotal>::get()
             .checked_add(reward)
             .ok_or("reward overflow")?;
+
         <RewardTotal>::put(new_total);
         // transaction contains two vector: possibly very expensive a pass by value (copying)
         // since we don't want to only read from transaction we may want to borrow from it 
@@ -141,8 +159,8 @@ impl<T: Config> Module<T> {
         
         //2. Create new UTXOs in UtxoStore
         let mut index: u64 = 0;
-        for output in &transaction.output {
-            let hash = BlakeTwo256::hash_of((&transaction.encode(), index));
+        for output in &transaction.outputs {
+            let hash = BlakeTwo256::hash_of(&(&transaction.encode(), index));
             index = index.checked_add(1).ok_or("output index overflow")?;
             <UtxoStore>::insert(hash,output);
         }
@@ -173,7 +191,7 @@ impl<T: Config> Module<T> {
                 pubkey: *authority,
             };
             let hash = BlakeTwo256::hash_of(&(&utxo, 
-                                              <system::Module<T>>::block_number()
+                                              <frame_system::Module<T>>::block_number()
                                               .saturated_into::<u64>()));
             if !<UtxoStore>::contains_key(hash) {
                 <UtxoStore>::insert(hash, utxo);
