@@ -40,7 +40,7 @@ pub use frame_support::{
 use pallet_transaction_payment::CurrencyAdapter;
 
 /// STEP 1 Import the template pallet.
-pub use utxo;
+pub use pallet_template;
 
 /// An index to a block.
 pub type BlockNumber = u32;
