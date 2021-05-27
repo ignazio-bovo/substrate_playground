@@ -3,7 +3,7 @@ authors = ['Ignazio Bovo']
 edition = '2018'
 homepage = 'https://substrate.dev'
 license = 'Unlicense'
-name = 'utxo_workshop_attempt_2'
+name = 'node-template-runtime'
 repository = 'https://github.com/substrate-developer-hub/substrate-node-template/'
 version = '3.0.0'
 
