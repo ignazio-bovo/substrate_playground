@@ -3,10 +3,14 @@ use sp_core::{
     crypto::Public as _,
     H256,
     H512,
+    sr25519::{Public, Signature},
 };
 
 use sp_std::collections::btree_map::BTreeMap;
 use sp_io::crypto::sr25519_verify;
+use sp_runtime::{
+    BlakeTwo256,
+}
 
 
 #[cfg(feature = "std")]
@@ -68,9 +72,8 @@ decl_storage! {
 		// Learn more about declaring storage items:
 		// https://substrate.dev/docs/en/knowledgebase/runtime/storage#declaring-storage-items
         //
-        UtxoSet : map hasher(identity) H256 => Utxo;
+        UtxoSet : map hasher(identity) H256 => Option<Utxo>;
         pub RewardTotal get(fn reward_total): Value;
-        pub Something: Option<u32>;
 	}
     add_extra_genesis {
         config(genesis_utxos): Vec<Utxo>;
@@ -162,21 +165,26 @@ impl <T: Config> Module<T> {
 
         // Variables sent to transaction pool
         let mut missing_utxos = Vec::new();
-        let mut new_utxos = Vec::new();
+        //let mut new_utxos = Vec::new();
         let mut reward: Value = 0;
 
         for input in tx.input.iter() {
             if let Some(input_utxo) = <UtxoSet>::get(&input.utxo_ref) {
                 ensure!(sr25519_verify(
-                        &Signature::from_raw(*input.sigscript.as_fixed_bytes()),
+                        &Signature::from_raw(*input.scriptSig.as_fixed_bytes()),
                         &simple_tx,
                         &Public::from_h256(input_utxo.pubScript)),
                         "input signature verification failed");
                 total_input = total_input.checked_add(input_utxo.value).ok_or("input value overflow")?;
             } else {
-                missing_utxo.push(input.utxo_ref.clone().as_fixed_bytes().to_vec());
+                missing_utxos.push(input.utxo_ref.clone().as_fixed_bytes().to_vec());
             }
 
+        }
+
+        for output in tx.output.iter() {
+            ensure!(output.value > 0, "output value must be non zero");
+            let hash = BlakeTwo256::hash_of(&(&tx.encode()), output_index); // prevent replay attacks
         }
 
         Ok(tx.clone())
