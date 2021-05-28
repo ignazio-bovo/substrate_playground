@@ -1,5 +1,8 @@
 use codec::{Decode, Encode};
-use sp_core::H256;
+use sp_core::{
+    H256,
+    H512,
+};
 
 
 #[cfg(feature = "std")]
@@ -28,11 +31,26 @@ pub trait Config: frame_system::Config {
 	type Event: From<Event<Self>> + Into<<Self as frame_system::Config>::Event>;
 }
 
-//#[cfg_attr(feature="std", derive(Serialize, Deserialize))] 
+#[cfg_attr(feature="std", derive(Serialize, Deserialize))] 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Default, Clone, Encode, Decode, Hash, Debug)]
 pub struct Utxo { // UTXO
     pub value: Value, 
     pub pubScript: H256,
+}
+
+#[cfg_attr(feature="std", derive(Serialize, Deserialize))] 
+#[derive(PartialEq, Eq, PartialOrd, Ord, Default, Clone, Encode, Decode, Hash, Debug)]
+pub struct TxInput {
+    pub tx_id: u64,
+    pub utxo_idx: u64, 
+    pub scriptSig: H512,
+}
+
+#[cfg_attr(feature="std", derive(Serialize, Deserialize))] 
+#[derive(PartialEq, Eq, PartialOrd, Ord, Default, Clone, Encode, Decode, Hash, Debug)]
+pub struct Transaction {
+    pub output: Vec<Utxo>,
+    pub input: Vec<TxInput>,
 }
 
 // The pallet's runtime storage items.
@@ -44,7 +62,9 @@ decl_storage! {
 	trait Store for Module<T: Config> as TemplateModule {
 		// Learn more about declaring storage items:
 		// https://substrate.dev/docs/en/knowledgebase/runtime/storage#declaring-storage-items
-        pub RewardTotal get(fn reward_total): Utxo;
+        //
+        UtxoSet : map hasher(identity) H256 => Utxo;
+        pub RewardTotal get(fn reward_total): Value;
         pub Something: Option<u32>;
 	}
     add_extra_genesis {
