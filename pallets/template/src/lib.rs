@@ -7,11 +7,13 @@ use sp_core::{
 };
 
 use sp_std::collections::btree_map::BTreeMap;
-use sp_io::crypto::sr25519_verify;
-use sp_runtime::{
-    BlakeTwo256,
-}
 
+use sp_io::crypto::sr25519_verify;
+
+use sp_runtime::{
+    traits::{BlakeTwo256,Hash},
+    transaction_validity::{ValidTransaction,TransactionLongevity},
+};
 
 #[cfg(feature = "std")]
 use serde::{Serialize, Deserialize};
@@ -23,6 +25,7 @@ use serde::{Serialize, Deserialize};
 
 use frame_support::{decl_module, decl_storage, decl_event, decl_error,
     dispatch::{DispatchResult, Vec}, ensure};
+
 use frame_system::ensure_signed;
 
 #[cfg(test)]
@@ -39,6 +42,12 @@ pub type Value = u128;
 pub trait Config: frame_system::Config {
 	/// Because this pallet emits events, it depends on the runtime's definition of an event.
 	type Event: From<Event<Self>> + Into<<Self as frame_system::Config>::Event>;
+
+    // A source to determine he issuance portion of the block reward 
+    //type Issuance: Issuance<<Self as frame_system::Config>::BlockNumber, Value>;
+
+    // a source to determine the block author
+    //type BlockAuthor: BlockAuthor;
 }
 
 #[cfg_attr(feature="std", derive(Serialize, Deserialize))] 
@@ -68,11 +77,23 @@ decl_storage! {
 	// A unique name is used to ensure that the pallet's storage items are isolated.
 	// This name may be updated, but each pallet in the runtime must use a unique name.
 	// ---------------------------------vvvvvvvvvvvvvv
+    // Module will have as attributes the storage items specified below (as structs in order to be
+    // type-safe)
+    // In order to configure its genesis state we add a special attribute to the Module<T> 
+    // of type GenesisConfig which will be a struct whose attribute can be initialized with 
+    // the config macro.
 	trait Store for Module<T: Config> as TemplateModule {
 		// Learn more about declaring storage items:
 		// https://substrate.dev/docs/en/knowledgebase/runtime/storage#declaring-storage-items
-        //
-        UtxoSet : map hasher(identity) H256 => Option<Utxo>;
+        // initial value for this storage item set using the build closure that must always
+        // have one parameter of type GenesisConfig
+        UtxoSet build(|config: &GenesisConfig| {
+            config.genesis_utxos 
+                .iter()
+                .cloned()
+                .map(|u| (BlakeTwo256::hash_of(&u), u))
+                .collect::<Vec<_>>()
+        }): map hasher(identity) H256 => Option<Utxo>;
         pub RewardTotal get(fn reward_total): Value;
 	}
     add_extra_genesis {
@@ -88,6 +109,7 @@ decl_event!(
 		/// parameters. [something, who]
 		SomethingStored(u32, AccountId),
         TransactionSuccess(Transaction),
+        RewardIssued(Value, H256),
 	}
 );
 
@@ -117,29 +139,37 @@ decl_module! {
         #[weight = 1_000]
         fn spend(_origin, tx: Transaction) -> DispatchResult {
             let transaction_validity = Self::validate_transaction(&tx)?;
-            ensure!(transaction_validity.output.is_empty(), "missing inputs"); 
+            ensure!(transaction_validity.requires.is_empty(), "missing inputs"); 
 
-            Self::update_storage(&tx, transaction_validity.input.len() as Value)?;
+            Self::update_storage(&tx, transaction_validity.priority as Value)?;
 
-            //Self::deposit_event(Event::TransactionSuccess(tx));
+            Self::deposit_event(RawEvent::TransactionSuccess(tx));
 
             Ok(())
         }
+
+        // handler called by the system on block finalization 
+        //fn on_finalize() {
+            //match T::BlockAuthor::block_author() {
+                //None => Self::deposit_event(Event::RewardsWasted),
+                //Some(author) => Self::disperse_reward(&author),
+            //}           
+        //}
 	}
 }
 
 impl <T: Config> Module<T> {
-    pub fn validate_transaction(tx: &Transaction) -> Result<Transaction,&'static str> {
+    pub fn validate_transaction(tx: &Transaction) -> Result<ValidTransaction,&'static str> {
         // Ensures that:
         // - 1  inputs and outputs are not empty
         // - 2 all inputs match to existing, unspent and unlocked outputs
         // - 3 each input is used exactly once
         // - 4 each output is defined exactly once and has nonzero value
-        // - total output value must not exceed total input value
-        // - new outputs do not collide with existing ones
-        // - sum of input and output values does not overflow
-        // - provided signatures are valid
-        // - transaction outputs cannot be modified by malicious nodes
+        // - 5 total output value must not exceed total input value
+        // - 6 new outputs do not collide with existing ones
+        // - 7 sum of input and output values does not overflow
+        // - 8 provided signatures are valid
+        // - 9 transaction outputs cannot be modified by malicious nodes
 
         // 1
         ensure!(!tx.input.is_empty(), "no inputs");
@@ -165,11 +195,12 @@ impl <T: Config> Module<T> {
 
         // Variables sent to transaction pool
         let mut missing_utxos = Vec::new();
-        //let mut new_utxos = Vec::new();
+        let mut new_utxos = Vec::new();
         let mut reward: Value = 0;
 
         for input in tx.input.iter() {
             if let Some(input_utxo) = <UtxoSet>::get(&input.utxo_ref) {
+                // 8
                 ensure!(sr25519_verify(
                         &Signature::from_raw(*input.scriptSig.as_fixed_bytes()),
                         &simple_tx,
@@ -183,13 +214,49 @@ impl <T: Config> Module<T> {
         }
 
         for output in tx.output.iter() {
+            // 4
             ensure!(output.value > 0, "output value must be non zero");
-            let hash = BlakeTwo256::hash_of(&(&tx.encode()), output_index); // prevent replay attacks
+            let hash = BlakeTwo256::hash_of(&(&tx.encode(), output_index)); // prevent replay attacks
+            output_index = output_index.checked_add(1).ok_or("output index overflow")?;
+            // 6 
+            ensure!(!<UtxoSet>::contains_key(hash), "output already exists");
+            total_output = total_output.checked_add(output.value).ok_or("total output overflow")?;
+            new_utxos.push(hash.as_fixed_bytes().to_vec());
         }
 
-        Ok(tx.clone())
+        // race conditions
+        if missing_utxos.is_empty() {
+            ensure!( total_input >= total_output, "output value muste not exceed input value" ); 
+            reward = total_input.checked_sub(total_output).ok_or("reward underflow")?;
+        }
+        Ok(ValidTransaction {
+            requires: missing_utxos, 
+            provides: new_utxos, 
+            priority: reward as u64, 
+            longevity: TransactionLongevity::max_value(),
+            propagate: true,
+        })
     } 
     pub fn update_storage(transaction: &Transaction, priority: Value) -> DispatchResult {
+
+        // calculate new reward total 
+        let new_total = <RewardTotal>::get()
+            .checked_add(priority)
+            .ok_or("reward overflow")?;
+        <RewardTotal>::put(new_total);
+
+        for input in transaction.input.iter() {
+            <UtxoSet>::remove(input.utxo_ref);
+        }
+
+        let mut index: u64 = 0;
+        for output in transaction.output.iter() {
+            // adding a nonce to avoid replay attack
+            let hash = BlakeTwo256::hash_of(&(&transaction.encode(), index)); 
+            index = index.checked_add(1).ok_or("output index overflow")?; 
+            <UtxoSet>::insert(hash, output);
+        }
+
         Ok(())
     }
 
@@ -199,5 +266,18 @@ impl <T: Config> Module<T> {
             input.scriptSig = H512::zero();
         }
         _tx.encode()
+    }
+
+    fn dispense_reward(author: &Public) {
+        let reward = RewardTotal::take() ;//+ T::Issuance::issuance(frame_system::Module::<T>::block_number());
+        let utxo = Utxo {
+            value: reward, 
+            pubScript: H256::from_slice(author.as_slice()),
+        };
+
+        let temporary_fix: u64 = 0;
+        let hash = BlakeTwo256::hash_of(&(&utxo,temporary_fix));
+        <UtxoSet>::insert(hash, utxo); 
+        Self::deposit_event(RawEvent::RewardIssued(reward, hash));
     }
 }
